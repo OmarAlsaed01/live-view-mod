@@ -7,7 +7,7 @@
 Which model is running · what every step and subagent is working on · tokens, cost and limits
 
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
-![Version](https://img.shields.io/badge/version-0.2.6-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Surfaces](https://img.shields.io/badge/works%20in-Desktop%20%2B%20CLI-informational)
 
@@ -58,6 +58,10 @@ Which model is running · what every step and subagent is working on · tokens, 
 - ✅ **Steps** show what they worked on (`Read · auth.ts`, `Bash · Run the tests`) with durations.
 - 🔁 **Repeats fold** into one line (`Read ×3`).
 - 🤖 **Subagents** get their own box with model, live tool, tokens and time.
+- 👉 **Now line** in the Main box: the running tool with a live timer, `waiting on N agents`, or `thinking`.
+- ❌ **Failures say why**: a failed step shows the first line of its error under the ✗.
+- 📁 **Files** touched this turn: distinct files read, and which were edited or written.
+- ⌛ **Time split** in the answer box: time inside tools and agents vs. thinking.
 - ⏱️ **Timers tick every second** while anything is running.
 - 🌙 **Background agents** from earlier turns stay at the top until they finish.
 

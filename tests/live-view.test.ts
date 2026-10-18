@@ -281,3 +281,44 @@ test('a chat started elsewhere keeps the pane closed', async ($, on) => {
 test('a sibling folder named CodeOther keeps the pane closed', async ($, on) => {
   expect(await startIn($, on, 'C:\\Users\\dev\\CodeOther\\x')).not.toContain('live-view')
 })
+
+test('a failed step shows why it failed', async ($, on) => {
+  stubs(on, { failing: 'Bash' })
+  await startTurn($, 'run it')
+  await $.tool.call({ tool: 'Bash', command: 'false' } as never)
+
+  for (const surface of SURFACES) {
+    const ui = await mountPane($, surface)
+    expect(await ui.find({ type: 'Text', text: /↳ boom/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('files touched this turn are counted, changed ones named', async ($, on) => {
+  stubs(on)
+  await startTurn($, 'edit things')
+  for (const f of ['a.ts', 'b.ts', 'a.ts']) await $.tool.call({ tool: 'Read', file_path: `/repo/${f}` } as never)
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/a.ts' } as never)
+  await $.tool.call({ tool: 'Write', file_path: '/repo/new.ts' } as never)
+
+  for (const surface of SURFACES) {
+    const ui = await mountPane($, surface)
+    expect(await ui.find({ type: 'Text', text: /Files · 2 read · 2 changed \(a\.ts, new\.ts\)/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('the Main box says what it is doing now, and the answer box splits tool and thinking time', async ($, on) => {
+  stubs(on)
+  await startTurn($, 'think')
+
+  let ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /↳ thinking/ })).toBeDefined()
+  await ui.unmount()
+
+  await $.tool.call({ tool: 'Read', file_path: 'a.ts' } as never)
+  await endTurn($)
+  ui = await mountPane($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: /tools .* · thinking / })).toBeDefined()
+  await ui.unmount()
+})

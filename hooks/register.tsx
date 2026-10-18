@@ -105,6 +105,50 @@ const detailOf = (tool: string, e: unknown): string | undefined => {
   return found ? clip(found) : undefined
 }
 
+/** The file a Read/Edit/Write/NotebookEdit call works on, in full (used only to count distinct files). */
+const pathOf = (tool: string, e: unknown): string | undefined => {
+  if (tool !== 'Read' && tool !== 'Edit' && tool !== 'Write' && tool !== 'NotebookEdit') return undefined
+  const args = e as Record<string, unknown>
+  const raw = tool === 'NotebookEdit' ? args.notebook_path : args.file_path
+
+  return typeof raw === 'string' && raw ? raw : undefined
+}
+
+const baseName = (path: string): string => path.split(/[\\/]/).pop() ?? path
+
+/** Why a call failed, from whatever the engine gave back: a denial, the tool's stderr or text, or the thrown error. */
+const errorOf = (ran: unknown, err?: unknown): string | undefined => {
+  const pick = (v: unknown): string | undefined => {
+    if (typeof v !== 'string') return undefined
+    const first = v
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .find(Boolean)
+
+    return first ? clip(first, 70) : undefined
+  }
+  if (err !== undefined) return pick(err instanceof Error ? err.message : err)
+  const r = ran as { deny?: unknown; text?: unknown; result?: unknown } | null
+  const res = r?.result as { stderr?: unknown; error?: unknown } | string | undefined
+  if (typeof r?.deny === 'string') return pick(`denied: ${r.deny}`)
+  const obj = typeof res === 'object' && res !== null ? res : undefined
+
+  return pick(obj?.stderr) ?? pick(obj?.error) ?? pick(typeof res === 'string' ? res : undefined) ?? pick(r?.text)
+}
+
+/** Length of the union of [start, end] spans, so overlapping parallel calls count once. */
+const unionMs = (spans: [number, number][]): number => {
+  let total = 0
+  let end = -Infinity
+  for (const [a, b] of spans.slice().sort((x, y) => x[0] - y[0])) {
+    if (b <= end) continue
+    total += b - Math.max(a, end)
+    end = b
+  }
+
+  return total
+}
+
 // Flow graph: agent boxes in one row; below this width per box the agents are drawn as lines instead.
 const NODE_MAX_W = 34
 const NODE_MIN_W = 16
@@ -141,7 +185,7 @@ const bar = (percent: number): string => {
 
 /** One line of the flow: a run of the same main-chat tool folds into one step (Read ×3). */
 type Step =
-  | { kind: 'tool'; label: string; detail?: string; count: number; startedAt: number; endedAt?: number; isDone: boolean; isError: boolean }
+  | { kind: 'tool'; label: string; detail?: string; error?: string; count: number; startedAt: number; endedAt?: number; isDone: boolean; isError: boolean }
   | { kind: 'advisor'; startedAt: number }
   | { kind: 'agents'; ids: string[]; startedAt: number }
 
@@ -164,6 +208,7 @@ const stepsOf = (list: ToolItem[], agentList: AgentItem[]): Step[] => {
       prev.detail = one.detail ?? prev.detail
       prev.isDone = one.isDone
       prev.isError = !!one.isError
+      prev.error = one.error
       prev.endedAt = one.endedAt
       continue
     }
@@ -171,6 +216,7 @@ const stepsOf = (list: ToolItem[], agentList: AgentItem[]): Step[] => {
       kind: 'tool',
       label: one.label,
       detail: one.detail,
+      error: one.error,
       count: 1,
       startedAt: one.startedAt,
       endedAt: one.endedAt,
@@ -423,6 +469,7 @@ export const register: Register = on => {
       id: e.tool_use_id ?? `${label}-${Date.now()}`,
       label,
       detail: detailOf(label, e),
+      path: pathOf(label, e),
       agentId: e.agentId ?? '',
       turn,
       startedAt: Date.now(),
@@ -435,17 +482,20 @@ export const register: Register = on => {
       await update($, agents, list => list.map(one => (one.id === item.agentId ? { ...one, tools: one.tools + 1, now } : one)))
     }
     let isError = false
+    let error: string | undefined
     try {
       const ran = await next(e)
       isError = typeof ran === 'object' && ran !== null && (!!(ran as { isError?: boolean }).isError || 'deny' in ran)
+      if (isError) error = errorOf(ran)
 
       return ran
     } catch (err) {
       isError = true
+      error = errorOf(undefined, err)
       throw err
     } finally {
       const endedAt = Date.now()
-      await update($, tools, list => list.map(one => (one.id === item.id ? { ...one, isDone: true, isError, endedAt } : one)))
+      await update($, tools, list => list.map(one => (one.id === item.id ? { ...one, isDone: true, isError, error, endedAt } : one)))
     }
   })
 
@@ -510,6 +560,36 @@ export const register: Register = on => {
     // Agents still running from an earlier turn (background work) stay on screen at the top of this one.
     const carried = agentList.filter(one => !one.isDone && one.turn !== turnN)
     const earlier = turnList.slice(0, -1).slice(-SHOWN_TURNS)
+    // Where the turn's time went: inside tools/agents vs. the model thinking (or waiting on the person).
+    const turnCalls = toolList.filter(one => one.turn === turnN && one.kind !== 'advisor')
+    const turnEnd = turn?.endedAt ?? now
+    const spans: [number, number][] = [
+      ...turnCalls.map((one): [number, number] => [one.startedAt, one.endedAt ?? now]),
+      ...turnAgents.map((one): [number, number] => [one.startedAt, one.isDone && one.seconds !== undefined ? one.startedAt + one.seconds * 1000 : now]),
+    ]
+    const clipped = spans.map(([a, b]): [number, number] => [Math.max(a, turn?.startedAt ?? a), Math.min(b, turnEnd)]).filter(([a, b]) => b > a)
+    const busyMs = unionMs(clipped)
+    const thinkMs = Math.max(0, turnEnd - (turn?.startedAt ?? turnEnd) - busyMs)
+    // What Main is doing right now: the running tool, agents it waits on, or the model between calls.
+    const runningCalls = mainCalls.filter(one => !one.isDone && one.kind !== 'advisor')
+    const lastCall = runningCalls[runningCalls.length - 1]
+    const lastEnd = mainCalls.reduce((max, one) => Math.max(max, one.endedAt ?? 0), turn?.startedAt ?? now)
+    const nowLine = lastCall
+      ? `${lastCall.label}${lastCall.detail ? ` · ${clip(lastCall.detail, 28)}` : ''} · ${dur(now - lastCall.startedAt)}${runningCalls.length > 1 ? ` +${runningCalls.length - 1}` : ''}`
+      : running > 0
+        ? `waiting on ${running} agent${running === 1 ? '' : 's'}`
+        : `thinking · ${dur(now - lastEnd)}`
+    // Distinct files touched this turn (main chat and subagents).
+    const fileKinds = { read: new Set<string>(), edited: new Set<string>(), written: new Set<string>() }
+    for (const one of turnCalls) {
+      if (!one.path) continue
+      if (one.label === 'Read') fileKinds.read.add(one.path)
+      else if (one.label === 'Write') fileKinds.written.add(one.path)
+      else fileKinds.edited.add(one.path)
+    }
+    const changed = [...new Set([...fileKinds.edited, ...fileKinds.written])]
+    const changedNames = changed.slice(0, 3).map(baseName).join(', ') + (changed.length > 3 ? ` +${changed.length - 3}` : '')
+    const hasFiles = fileKinds.read.size + changed.length > 0
     const line = (text = '│') => (
       <Box alignSelf="center">
         <Text dimColor>{text}</Text>
@@ -599,13 +679,20 @@ export const register: Register = on => {
       const took = step.isDone ? dur((step.endedAt ?? step.startedAt) - step.startedAt) : dur(now - step.startedAt)
 
       return (
-        <Text dimColor={step.isDone && !step.isError} wrap="truncate-end">
-          <Text color={markColor}>{mark}</Text>
-          <Text bold={!step.isDone}>{step.label}</Text>
-          {step.count > 1 ? ` ×${step.count}` : ''}
-          {step.detail ? ` · ${step.detail}` : ''}
-          <Text dimColor> · {step.isDone ? took : `${took}…`}</Text>
-        </Text>
+        <Box flexDirection="column" alignItems="center">
+          <Text dimColor={step.isDone && !step.isError} wrap="truncate-end">
+            <Text color={markColor}>{mark}</Text>
+            <Text bold={!step.isDone}>{step.label}</Text>
+            {step.count > 1 ? ` ×${step.count}` : ''}
+            {step.detail ? ` · ${step.detail}` : ''}
+            <Text dimColor> · {step.isDone ? took : `${took}…`}</Text>
+          </Text>
+          {step.isError && step.error && (
+            <Text color={DIM_RED} wrap="truncate-end">
+              ↳ {step.error}
+            </Text>
+          )}
+        </Box>
       )
     }
 
@@ -673,6 +760,11 @@ export const register: Register = on => {
                   Main · {pretty(current)}
                 </Text>
                 <Text dimColor>{working ? `● working · ${mainCalls.length} call${mainCalls.length === 1 ? '' : 's'}` : '○ idle'}</Text>
+                {working && (
+                  <Text color={lastCall ? RUNNING : undefined} dimColor={!lastCall}>
+                    ↳ {nowLine}
+                  </Text>
+                )}
               </Box>
               {adv.calls > 0 && <Text dimColor> ◂┄ </Text>}
               {adv.calls > 0 && (
@@ -704,8 +796,17 @@ export const register: Register = on => {
             {steps.map(step => (
               <Box alignSelf="center">{stepRow(step)}</Box>
             ))}
+            {hasFiles && (
+              <Box flexDirection="column" alignItems="center" alignSelf="center">
+                {line()}
+                <Text dimColor wrap="truncate-end">
+                  Files · {fileKinds.read.size} read
+                  {changed.length > 0 ? ` · ${changed.length} changed (${changedNames})` : ''}
+                </Text>
+              </Box>
+            )}
             {line(isTerminal ? '│' : '↓')}
-            <Box borderStyle="round" borderColor={working ? '#e8962a' : turn.reason && turn.reason !== 'answer' ? DIM_RED : DONE} paddingX={1}>
+            <Box borderStyle="round" flexDirection="column" borderColor={working ? '#e8962a' : turn.reason && turn.reason !== 'answer' ? DIM_RED : DONE} paddingX={1}>
               <Text>
                 {working
                   ? `● working · ${dur(now - turn.startedAt)}`
@@ -717,6 +818,11 @@ export const register: Register = on => {
                   {` · ${mainCalls.length} call${mainCalls.length === 1 ? '' : 's'}`}
                 </Text>
               </Text>
+              {busyMs + thinkMs > 0 && (
+                <Text dimColor>
+                  tools {dur(busyMs)} · thinking {dur(thinkMs)}
+                </Text>
+              )}
             </Box>
           </Box>
         )}

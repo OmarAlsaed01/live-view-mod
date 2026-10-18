@@ -3,6 +3,10 @@ export type ToolItem = {
   label: string
   /** What it worked on: a file name, a command's description, a pattern. */
   detail?: string
+  /** Full path for Read/Edit/Write/NotebookEdit calls, to count distinct files. */
+  path?: string
+  /** First line of why the call failed. */
+  error?: string
   /** '' for the main chat, else the subagent's id. */
   agentId: string
   /** The main-chat turn it ran in (1-based). */
