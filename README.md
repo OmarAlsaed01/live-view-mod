@@ -1,31 +1,27 @@
 <div align="center">
 
-# 🔭 live-view
+# live-view
 
-**A live pane for Claude Code that shows what your chat is doing, as it does it.**
+**See what your Claude Code chat is doing while it does it.**
 
-Which model is running · what every step and subagent is working on · tokens, cost and limits
+A live pane that shows the model, every step and subagent as it runs, plus tokens, cost and limits.
 
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
 ![Version](https://img.shields.io/badge/version-0.3.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Surfaces](https://img.shields.io/badge/works%20in-Desktop%20%2B%20CLI-informational)
 
 </div>
 
 ---
 
-## ✨ What you get
+## Why
 
-| | |
-|---|---|
-| 💬 **This chat** | Main model (color-coded) and whether it's working or idle |
-| 📊 **Header** | Context used, cost (list price), and your 5-hour / 7-day limits |
-| 🧮 **Models** | Tokens in, out and cached per model, with request counts |
-| 🔀 **Live flow** | A graph of the current turn: your prompt, the Main box, each step as it runs, and subagents fanning out in parallel |
-| 🕘 **Earlier turns** | One line each for the last three |
+The chat shows what Claude says. It doesn't show what is happening underneath: which tool is running, whether a subagent is stuck, which model did the work, how much it all cost. live-view puts that in a side pane, so a long task stops being a black box.
 
-### The live flow
+- **Flow graph** of the current turn: your prompt, the Main box, each step, and parallel subagents fanning out.
+- **Now line** for what is running right now, with a live timer.
+- **Failures say why**, with the first line of the error.
+- **Usage at a glance**: tokens per model, context, cost, and your 5-hour and 7-day limits.
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -55,61 +51,62 @@ Which model is running · what every step and subagent is working on · tokens, 
 └──────────────────────────────────────────────┘
 ```
 
-- ✅ **Steps** show what they worked on (`Read · auth.ts`, `Bash · Run the tests`) with durations.
-- 🔁 **Repeats fold** into one line (`Read ×3`).
-- 🤖 **Subagents** get their own box with model, live tool, tokens and time.
-- 👉 **Now line** in the Main box: the running tool with a live timer, `waiting on N agents`, or `thinking`.
-- ❌ **Failures say why**: a failed step shows the first line of its error under the ✗.
-- 📁 **Files** touched this turn: distinct files read, and which were edited or written.
-- ⌛ **Time split** in the answer box: time inside tools and agents vs. thinking.
-- ⏱️ **Timers tick every second** while anything is running.
-- 🌙 **Background agents** from earlier turns stay at the top until they finish.
+## Install
 
-## 📦 Install
-
-> Hooks modules are an early-access Claude Code feature, so behavior may change between versions.
+Hooks modules are an early-access Claude Code feature, so behavior may change between versions.
 
 ```bash
 claude plugin marketplace add OmarAlsaed01/live-view-mod
 claude plugin install live-view@live-view-local
 ```
 
-Then start a **new** chat. Running chats need a restart to pick up a mod.
+Start a new chat afterwards. Running chats only pick up a mod at start.
 
-**CLI only:** set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` before running `claude`.
+In the CLI, set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` before running `claude`:
 
 ```powershell
 $env:CLAUDE_CODE_ENABLE_FUNCTION_HOOKS = "1"; claude
 ```
 
-## 🚀 Use
+## Usage
 
-| Do this | To get this |
+| To do this | Do this |
 |---|---|
-| Type `/live-view` | Open the pane in any chat |
-| Start a chat in a folder named `Code` (or below one) | The pane opens on its own |
-| Spawn a subagent, enter plan mode, or run a Workflow | The pane opens on its own |
-| Close the pane with the **✕** | It stays closed for that chat |
+| Open the pane | Type `/live-view` |
+| Have it open on its own | Start a chat in a folder named `Code` (or below one), spawn a subagent, enter plan mode, or run a Workflow |
+| Keep it closed for a chat | Close it with the X |
 
-In the terminal the pane opens once the window is **144+ columns** wide.
+In the terminal the pane opens once the window is 144 columns wide or more.
 
-## 🧰 Manage
+### What each part shows
+
+| Part | Contents |
+|---|---|
+| This chat | Main model (color-coded), working or idle |
+| Header | Context used, cost at list price, 5-hour and 7-day limits |
+| Models | Tokens in, out and cached per model, with request counts |
+| Live flow | The graph above. Repeated calls fold (`Read ×3`), steps show what they worked on, timers tick every second |
+| Earlier turns | One line each for the last three |
+
+The flow also shows a Files line (distinct files read, edited or written), and the answer box splits time spent in tools and agents from time spent thinking.
+
+## Manage
 
 ```bash
-claude plugin disable live-view      # turn off everywhere
-claude plugin enable live-view       # turn back on
+claude plugin disable live-view
+claude plugin enable live-view
 claude plugin update live-view@live-view-local
 claude plugin uninstall live-view
 ```
 
-## ⚠️ Known gaps
+## Known gaps
 
-- 💲 Cost is **list price**, not your plan bill.
-- 🧠 The advisor shows a call count only, not the tokens it spent.
-- 🔄 The model line refreshes once per turn, so it can lag a turn when plan mode flips models.
-- 🎨 The pane can only draw text, boxes, colors and borders: no charts or animation.
+- Cost is list price, not your plan bill.
+- The advisor shows a call count only, not the tokens it spent.
+- The model line refreshes once per turn, so it can lag a turn when plan mode switches models.
+- The pane draws text, boxes, colors and borders only. No charts or animation.
 
-## 🛠️ Develop
+## Development
 
 ```bash
 claude plugin validate .
@@ -117,7 +114,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test .
 npx -p typescript@5 tsc -p .
 ```
 
-| File | What it is |
+| File | Purpose |
 |---|---|
 | `hooks/register.tsx` | The whole mod: events and the pane renderer |
 | `types/index.d.ts` | The `$.state` contract (must match the atoms in `register.tsx`) |
@@ -126,6 +123,10 @@ npx -p typescript@5 tsc -p .
 
 After editing, bump `version` in `.claude-plugin/plugin.json`, then run `claude plugin marketplace update live-view-local` and `claude plugin update live-view@live-view-local`.
 
-## 📄 License
+## Contributing
 
-[MIT](LICENSE) © Omar Alsaed
+Bug reports and ideas are welcome: [open an issue](https://github.com/OmarAlsaed01/live-view-mod/issues). For a code change, fork the repo, make sure the tests and type-check above pass, and open a pull request.
+
+## License
+
+[MIT](LICENSE)
