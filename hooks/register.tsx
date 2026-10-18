@@ -20,7 +20,7 @@ const MAX_AGENTS = 60
 const MAX_TURNS = 30
 const SHOWN_STEPS = 8
 const SHOWN_TURNS = 3
-const HIDDEN_TOOLS = new Set(['SubagentHandback', 'update_plan'])
+const HIDDEN_TOOLS = new Set(['SubagentHandback', 'update_plan', 'wrap_up'])
 // Darker than the terminal pane's default so it blends with a black terminal; the desktop surface keeps its own background.
 const TERMINAL_BG = '#0c0c0c'
 const BAR_W = 12

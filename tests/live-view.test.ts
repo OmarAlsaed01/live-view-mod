@@ -236,15 +236,17 @@ test('the pane stays closed on a plain tool call outside the Code folder', async
   expect(opened).not.toContain('live-view')
 })
 
-test('hidden tools (SubagentHandback, update_plan) never show', async ($, on) => {
+test('hidden tools (SubagentHandback, update_plan, wrap_up) never show', async ($, on) => {
   stubs(on)
   await startTurn($, 'quiet')
   await $.tool.call({ tool: 'SubagentHandback', command: 'x' } as never)
   await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: [] } as never)
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'x' } as never)
 
   const ui = await mountPane($, 'terminal')
   expect(await ui.find({ type: 'Text', text: /SubagentHandback/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /update_plan/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /wrap_up/ })).toBeUndefined()
   await ui.unmount()
 })
 

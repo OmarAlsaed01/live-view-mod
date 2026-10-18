@@ -7,7 +7,7 @@
 Which model is running · what every step and subagent is working on · tokens, cost and limits
 
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Surfaces](https://img.shields.io/badge/works%20in-Desktop%20%2B%20CLI-informational)
 

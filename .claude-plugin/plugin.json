@@ -1,6 +1,6 @@
 {
   "name": "live-view",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Live flow graph of what this chat is doing: the prompt, Main, every step and subagent as it runs, with timers.",
   "author": { "name": "Omar Alsaed", "url": "https://github.com/OmarAlsaed01" },
   "homepage": "https://github.com/OmarAlsaed01/live-view-mod",
