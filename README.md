@@ -1,6 +1,6 @@
 <div align="center">
 
-# live-view
+# 🔭 Live View
 
 **See what your Claude Code chat is doing while it does it.**
 
@@ -16,7 +16,7 @@ A live pane that shows the model, every step and subagent as it runs, plus token
 
 ## Why
 
-The chat shows what Claude says. It doesn't show what is happening underneath: which tool is running, whether a subagent is stuck, which model did the work, how much it all cost. live-view puts that in a side pane, so a long task stops being a black box.
+The chat shows what Claude says. It doesn't show what is happening underneath: which tool is running, whether a subagent is stuck, which model did the work, how much it all cost. Live View puts that in a side pane, so a long task stops being a black box.
 
 - **Flow graph** of the current turn: your prompt, the Main box, each step, and parallel subagents fanning out.
 - **Now line** for what is running right now, with a live timer.
@@ -51,7 +51,7 @@ The chat shows what Claude says. It doesn't show what is happening underneath: w
 └──────────────────────────────────────────────┘
 ```
 
-## Install
+## 📦 Install
 
 Hooks modules are an early-access Claude Code feature, so behavior may change between versions.
 
@@ -68,7 +68,7 @@ In the CLI, set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` before running `claude`:
 $env:CLAUDE_CODE_ENABLE_FUNCTION_HOOKS = "1"; claude
 ```
 
-## Usage
+## 🚀 Usage
 
 | To do this | Do this |
 |---|---|
@@ -99,14 +99,14 @@ claude plugin update live-view@live-view-local
 claude plugin uninstall live-view
 ```
 
-## Known gaps
+## ⚠️ Known gaps
 
 - Cost is list price, not your plan bill.
 - The advisor shows a call count only, not the tokens it spent.
 - The model line refreshes once per turn, so it can lag a turn when plan mode switches models.
 - The pane draws text, boxes, colors and borders only. No charts or animation.
 
-## Development
+## 🛠️ Development
 
 ```bash
 claude plugin validate .
