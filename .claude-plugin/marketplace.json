@@ -1,0 +1,11 @@
+{
+  "name": "live-view-local",
+  "owner": { "name": "Omar Alsaed" },
+  "plugins": [
+    {
+      "name": "live-view",
+      "description": "Live flow pane: chat model, steps, subagents, tokens and cost",
+      "source": "./"
+    }
+  ]
+}
