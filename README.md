@@ -7,7 +7,7 @@
 A live pane that shows the model, every step and subagent as it runs, plus tokens, cost and limits.
 
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
-![Version](https://img.shields.io/badge/version-0.3.1-blue)
+![Version](https://img.shields.io/badge/version-0.4.3-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 </div>
@@ -82,13 +82,15 @@ In the terminal the pane opens once the window is 144 columns wide or more.
 
 | Part | Contents |
 |---|---|
-| This chat | Main model (color-coded), working or idle |
+| This chat | Main model (color-coded), working, idle, or waiting on a session it started |
 | Header | Context used, cost at list price, 5-hour and 7-day limits |
 | Models | Tokens in, out and cached per model, with request counts |
 | Live flow | The graph above. Repeated calls fold (`Read ×3`), steps show what they worked on, timers tick every second |
 | Earlier turns | One line each for the last three |
 
 The flow also shows a Files line (distinct files read, edited or written), and the answer box splits time spent in tools and agents from time spent thinking.
+
+When the chat starts a separate session and ends its turn, Main reads "waiting on 1 session" and a box lists it with its start time. The wait ends at the next turn, which is the wake-up when that session finishes.
 
 ## Manage
 
@@ -103,6 +105,7 @@ claude plugin uninstall live-view
 
 - Cost is list price, not your plan bill.
 - The advisor shows a call count only, not the tokens it spent.
+- The pane cannot see the other session, so it shows "started", not its progress. If that session is stopped or archived, the wait label stays until the next turn.
 - The model line refreshes once per turn, so it can lag a turn when plan mode switches models.
 - The pane draws text, boxes, colors and borders only. No charts or animation.
 

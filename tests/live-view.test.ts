@@ -324,3 +324,108 @@ test('the Main box says what it is doing now, and the answer box splits tool and
   expect(await ui.find({ type: 'Text', text: /tools .* · thinking / })).toBeDefined()
   await ui.unmount()
 })
+
+/** Answers tool calls with a fixed text, as the session tools do. */
+const sessionStubs = (on: OnT, text: string) => {
+  on('tool.call', async () => ({ result: [{ type: 'text', text }] }) as never)
+  on('turn.start', async (_$, e) => ({ turnId: (e as { turnId: string }).turnId }) as never)
+  on('turn.complete', async () => ({ text: '' }) as never)
+  on('prompt.submit', async (_$, e) => e as never)
+}
+
+const STARTED_TEXT =
+  'Started session "Build the parser" (session_id: local_00000000-0000-4000-8000-000000000001, name: parser). It runs on its own; you get a note here when its turn ends.'
+const START = { tool: 'mcp__ccd_session__start_session', initiation: 'user_asked', title: 'Build the parser' } as never
+
+test('a chat that started a session says it is waiting on it, not idle', async ($, on) => {
+  sessionStubs(on, STARTED_TEXT)
+  await startTurn($, 'split this off')
+  await $.tool.call(START)
+  await endTurn($)
+
+  for (const surface of SURFACES) {
+    const ui = await mountPane($, surface)
+    expect(await ui.find({ type: 'Text', text: /waiting on 1 session/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Build the parser/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /idle/ })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('a proposal card or an offer awaiting the answer is not a wait', async ($, on) => {
+  sessionStubs(on, 'Proposed "Fix the thing" (task_id: task_00000001). The user sees a card and nothing runs until they start it.')
+  await startTurn($, 'maybe later')
+  await $.tool.call({ tool: 'mcp__ccd_session__start_session', initiation: 'own_initiative', title: 'Fix the thing' } as never)
+  await endTurn($)
+
+  const ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /waiting on/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /idle/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the next turn ends the wait', async ($, on) => {
+  sessionStubs(on, STARTED_TEXT)
+  await startTurn($, 'split this off', 't1')
+  await $.tool.call(START)
+  await endTurn($, 't1')
+  await $.turn.start({ text: '', turnId: 't2' } as never)
+  await endTurn($, 't2')
+
+  const ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /waiting on/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /idle/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('time spent waiting on a started session is shown as waiting, not thinking', async ($, on) => {
+  sessionStubs(on, STARTED_TEXT)
+  await startTurn($, 'split this off', 't1')
+  await $.tool.call(START)
+  await endTurn($, 't1')
+  await new Promise(done => (globalThis as unknown as { setTimeout(fn: () => void, ms: number): void }).setTimeout(() => done(undefined), 1200))
+  await $.turn.start({ text: '', turnId: 't2' } as never)
+  await endTurn($, 't2')
+
+  const ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /waiting 1\.\ds|waiting 1[0-9]s/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a turn that never waited on a session shows no waiting figure', async ($, on) => {
+  stubs(on)
+  await startTurn($, 'plain')
+  await endTurn($)
+
+  const ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /waiting \d/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a typed prompt behind the app\'s system-reminder still starts a turn with the typed text', async ($, on) => {
+  stubs(on)
+  await startTurn($, 'first ask', 't1')
+  await endTurn($, 't1')
+  const reminder = '<system-reminder>\nLinked sessions now (status): one = local_x (idle).\n</system-reminder>\n\n'
+  await startTurn($, `${reminder}second ask`, 't2')
+
+  const ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /second ask/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Linked sessions/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Earlier turns/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a prompt that is only a system-reminder or a wake-up note stays a continuation', async ($, on) => {
+  stubs(on)
+  await startTurn($, 'real ask', 't1')
+  await endTurn($, 't1')
+  await $.prompt.submit({ text: '<system-reminder>\nLinked sessions now: one (idle).\n</system-reminder>\n\n<side-sessions-event>None working.</side-sessions-event>' } as never)
+  await $.turn.start({ text: '', turnId: 't2' } as never)
+
+  const ui = await mountPane($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /real ask/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /turn 1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Earlier turns/ })).toBeUndefined()
+  await ui.unmount()
+})

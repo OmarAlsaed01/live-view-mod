@@ -47,6 +47,10 @@ export type TurnItem = {
   startedAt: number
   endedAt?: number
   reason?: string
+  /** When the turn ended with a started session still out; the wake-up that continues the turn closes the span. */
+  waitFrom?: number
+  /** Time this turn spent idle, waiting on sessions it started. */
+  waitedMs?: number
 }
 
 /** Tokens one model has used this session, main chat and subagents together. */
@@ -63,6 +67,9 @@ export type SessionNumbers = {
 
 export type AdvisorStats = { calls: number; lastAt?: number }
 
+/** A session this chat started and expects to hear back from (its result is a note that wakes the chat). */
+export type LinkedSession = { id: string; title: string; startedAt: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'live-view': {
@@ -77,6 +84,7 @@ declare module 'claude-code' {
       models: Record<string, ModelTotals>
       session: SessionNumbers
       advisor: AdvisorStats
+      linked: LinkedSession[]
     }
   }
 }

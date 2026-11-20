@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register, SessionUsage } from 'claude-code'
 
-import type { AdvisorStats, AgentItem, ModelTotals, SessionNumbers, ToolItem, TurnItem } from '../types'
+import type { AdvisorStats, AgentItem, LinkedSession, ModelTotals, SessionNumbers, ToolItem, TurnItem } from '../types'
 
 const PANE = 'live-view'
 const tools = atom({ plugin: 'live-view', key: 'tools' } as const, [] as ToolItem[])
@@ -14,6 +14,7 @@ const isWorking = atom({ plugin: 'live-view', key: 'isWorking' } as const, false
 const models = atom({ plugin: 'live-view', key: 'models' } as const, {} as Record<string, ModelTotals>)
 const session = atom({ plugin: 'live-view', key: 'session' } as const, {} as SessionNumbers)
 const advisor = atom({ plugin: 'live-view', key: 'advisor' } as const, { calls: 0 } as AdvisorStats)
+const linked = atom({ plugin: 'live-view', key: 'linked' } as const, [] as LinkedSession[])
 
 const MAX_TOOLS = 200
 const MAX_AGENTS = 60
@@ -21,6 +22,10 @@ const MAX_TURNS = 30
 const SHOWN_STEPS = 8
 const SHOWN_TURNS = 3
 const HIDDEN_TOOLS = new Set(['SubagentHandback', 'update_plan', 'wrap_up'])
+const MAX_LINKED = 10
+const SESSION_TOOLS = new Set(['mcp__ccd_session__start_session', 'mcp__ccd_session__hand_off_to_session'])
+// A started session's result reads: Started session "<title>" (session_id: local_…). A proposal card says "Proposed", an offer's first call "The user chose".
+const STARTED = /Started session \\?"(.+?)\\?" \(session_id: (local_[\w-]+)/
 // Darker than the terminal pane's default so it blends with a black terminal; the desktop surface keeps its own background.
 const TERMINAL_BG = '#0c0c0c'
 const BAR_W = 12
@@ -58,10 +63,12 @@ const fmt = (n: number): string => {
 /** 4200 -> 4.2s, 72000 -> 1m 12s. */
 const dur = (ms: number): string => {
   const s = Math.max(0, ms) / 1000
-  if (s < 10) return `${s.toFixed(1)}s`
-  if (s < 60) return `${Math.round(s)}s`
+  if (s < 9.95) return `${s.toFixed(1)}s`
+  // Round to whole seconds first, then split, so 179.6s reads 3m 0s and never 2m 60s.
+  const whole = Math.round(s)
+  if (whole < 60) return `${whole}s`
 
-  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
+  return `${Math.floor(whole / 60)}m ${whole % 60}s`
 }
 
 const clip = (text: string, max = 44): string => {
@@ -367,10 +374,11 @@ export const register: Register = on => {
   // Only what the person typed starts a turn; meta prompts (notifications) and slash commands do not.
   on('prompt.submit', async ($, e, next) => {
     const submitted = await next(e)
-    const text = e.text.trim()
+    // The app puts a <system-reminder> (linked sessions, attribution) ahead of what the person typed; what is left is theirs.
+    const text = e.text.replace(/^\s*(?:<system-reminder>[\s\S]*?<\/system-reminder>\s*)+/, '').trim()
     // Background-task wakes arrive as prompts with isMeta unset; skip their XML/system wrappers.
     const automated = /^<(task-notification|system-reminder|side-sessions-event|ci-monitor-event)\b/.test(text) || text.startsWith('[SYSTEM NOTIFICATION')
-    if (!e.isMeta && !e.command && text && !automated) pendingPrompt = e.text
+    if (!e.isMeta && !e.command && text && !automated) pendingPrompt = text
 
     return submitted
   })
@@ -380,12 +388,19 @@ export const register: Register = on => {
     if (!e.agentId) {
       await refreshModel($)
       await update($, isWorking, () => true)
+      // The wake-up (or the person typing) ends the wait; a session started this turn is added again by its tool.call.
+      await update($, linked, () => [])
       const now = Date.now()
       const prompt = pendingPrompt
       pendingPrompt = undefined
       await update($, turns, list => {
         const last = list[list.length - 1]
-        if (prompt === undefined && last) return list.map(one => (one === last ? { ...one, endedAt: undefined, reason: undefined } : one))
+        if (prompt === undefined && last) {
+          // A continuation closes the wait: the idle gap since the turn ended was spent on a session, not thinking.
+          const waited = (last.waitedMs ?? 0) + (last.waitFrom ? now - last.waitFrom : 0)
+
+          return list.map(one => (one === last ? { ...one, endedAt: undefined, reason: undefined, waitFrom: undefined, waitedMs: waited } : one))
+        }
         const n = (last?.n ?? 0) + 1
 
         return [...list, { n, prompt: prompt ?? '', startedAt: now }].slice(-MAX_TURNS)
@@ -453,7 +468,10 @@ export const register: Register = on => {
     } else {
       await update($, isWorking, () => false)
       const reason = (e as { reason?: string }).reason
-      await update($, turns, list => list.map((one, i) => (i === list.length - 1 && !one.endedAt ? { ...one, endedAt: now, reason } : one)))
+      const isWaiting = (await read($, linked)).length > 0
+      await update($, turns, list =>
+        list.map((one, i) => (i === list.length - 1 && !one.endedAt ? { ...one, endedAt: now, reason, waitFrom: isWaiting ? now : undefined } : one)),
+      )
     }
     await settleClock($)
     await refreshSession($)
@@ -487,6 +505,19 @@ export const register: Register = on => {
       const ran = await next(e)
       isError = typeof ran === 'object' && ran !== null && (!!(ran as { isError?: boolean }).isError || 'deny' in ran)
       if (isError) error = errorOf(ran)
+      if (!isError && SESSION_TOOLS.has(e.tool)) {
+        // A session this chat started will wake it when it ends a turn, so the chat is waiting, not finished.
+        let seen: RegExpExecArray | null = null
+        try {
+          seen = STARTED.exec(JSON.stringify(ran))
+        } catch {
+          // unreadable result: not counted
+        }
+        if (seen?.[1] && seen[2]) {
+          const started: LinkedSession = { id: seen[2], title: seen[1], startedAt: Date.now() }
+          await update($, linked, list => [...list.filter(one => one.id !== started.id), started].slice(-MAX_LINKED))
+        }
+      }
 
       return ran
     } catch (err) {
@@ -543,6 +574,8 @@ export const register: Register = on => {
     const byModel = await read($, models)
     const nums = await read($, session)
     const adv = await read($, advisor)
+    const waitingOn = await read($, linked)
+    const waitLabel = `waiting on ${waitingOn.length} session${waitingOn.length === 1 ? '' : 's'}`
     const now = Math.max(ticked, Date.now())
     const modelRows = Object.entries(byModel).sort((a, b) => b[1].output + b[1].input - (a[1].output + a[1].input))
     const grand = modelRows.reduce((sum, [, v]) => sum + v.input + v.output, 0)
@@ -569,7 +602,8 @@ export const register: Register = on => {
     ]
     const clipped = spans.map(([a, b]): [number, number] => [Math.max(a, turn?.startedAt ?? a), Math.min(b, turnEnd)]).filter(([a, b]) => b > a)
     const busyMs = unionMs(clipped)
-    const thinkMs = Math.max(0, turnEnd - (turn?.startedAt ?? turnEnd) - busyMs)
+    const waitedMs = turn?.waitedMs ?? 0
+    const thinkMs = Math.max(0, turnEnd - (turn?.startedAt ?? turnEnd) - busyMs - waitedMs)
     // What Main is doing right now: the running tool, agents it waits on, or the model between calls.
     const runningCalls = mainCalls.filter(one => !one.isDone && one.kind !== 'advisor')
     const lastCall = runningCalls[runningCalls.length - 1]
@@ -701,7 +735,7 @@ export const register: Register = on => {
         <Text bold>This chat</Text>
         <Text>
           {working ? '● ' : '○ '}Main · <Text color={colorOf(current)}>{pretty(current)}</Text>
-          <Text dimColor> · {working ? 'working…' : 'idle'}</Text>
+          <Text dimColor> · {working ? 'working…' : waitingOn.length ? waitLabel : 'idle'}</Text>
         </Text>
         {nums.contextPercent !== undefined && (
           <Text>
@@ -759,7 +793,7 @@ export const register: Register = on => {
                 <Text bold color={colorOf(current)}>
                   Main · {pretty(current)}
                 </Text>
-                <Text dimColor>{working ? `● working · ${mainCalls.length} call${mainCalls.length === 1 ? '' : 's'}` : '○ idle'}</Text>
+                <Text dimColor>{working ? `● working · ${mainCalls.length} call${mainCalls.length === 1 ? '' : 's'}` : waitingOn.length ? `○ ${waitLabel}` : '○ idle'}</Text>
                 {working && (
                   <Text color={lastCall ? RUNNING : undefined} dimColor={!lastCall}>
                     ↳ {nowLine}
@@ -778,6 +812,21 @@ export const register: Register = on => {
                 </Box>
               )}
             </Box>
+            {waitingOn.length > 0 && (
+              <Box flexDirection="column" alignItems="center" alignSelf="center">
+                {line()}
+                <Box borderStyle="round" borderColor="#808080" flexDirection="column" paddingX={1}>
+                  <Text dimColor>↗ Started in {waitingOn.length === 1 ? 'its own session' : `${waitingOn.length} sessions`} · wakes this chat when done</Text>
+                  {waitingOn.slice(0, 3).map(one => (
+                    <Text wrap="truncate-end">
+                      {clip(one.title, 40)}
+                      <Text dimColor> · started {new Date(one.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                    </Text>
+                  ))}
+                  {waitingOn.length > 3 && <Text dimColor>+{waitingOn.length - 3} more</Text>}
+                </Box>
+              </Box>
+            )}
             {carried.length > 0 && (
               <Box flexDirection="column" alignItems="center" alignSelf="center">
                 {line()}
@@ -818,9 +867,10 @@ export const register: Register = on => {
                   {` · ${mainCalls.length} call${mainCalls.length === 1 ? '' : 's'}`}
                 </Text>
               </Text>
-              {busyMs + thinkMs > 0 && (
+              {busyMs + thinkMs + waitedMs > 0 && (
                 <Text dimColor>
                   tools {dur(busyMs)} · thinking {dur(thinkMs)}
+                  {waitedMs >= 1000 ? ` · waiting ${dur(waitedMs)}` : ''}
                 </Text>
               )}
             </Box>
